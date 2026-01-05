@@ -24,10 +24,13 @@
         #loginPage { display: flex; background-color: #0f172a; flex-direction: column; align-items: center; justify-content: flex-start; min-height: 100vh; }
         #mainApp { display: none; }
         .btn-action { height: 50px; border-radius: 16px; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s; font-size: 14px; }
+        
+        /* 快速登入卡片樣式 */
         .user-card { 
             display: flex; align-items: center; justify-content: space-between; 
             background: #f8fafc; padding: 16px 20px; border-radius: 20px; 
             margin-bottom: 12px; border: 1px solid #e2e8f0; transition: 0.2s;
+            cursor: pointer;
         }
         .user-card:hover { border-color: #ef4444; background: white; }
         .delete-btn { color: #94a3b8; transition: 0.2s; padding: 8px; cursor: pointer; }
@@ -43,10 +46,10 @@
             <p class="text-slate-400 text-xs mb-8 font-bold uppercase tracking-widest">血壓心跳管理系統</p>
             <div class="space-y-4 mb-10">
                 <input type="text" id="userNameInput" placeholder="輸入使用者名稱..." class="w-full text-lg font-bold">
-                <button onclick="login()" class="w-full bg-red-600 text-white font-black py-4 rounded-2xl shadow-lg hover:bg-red-700 transition">登入系統</button>
+                <button onclick="login()" class="w-full bg-red-600 text-white font-black py-4 rounded-2xl shadow-lg hover:bg-red-700 transition">登入 或 建立帳號</button>
             </div>
             <div id="userListContainer" class="text-left border-t border-slate-100 pt-8 hidden">
-                <h3 class="text-xs font-black text-slate-400 mb-4 uppercase tracking-widest px-2">快速登入</h3>
+                <h3 class="text-xs font-black text-slate-400 mb-4 uppercase tracking-widest px-2">快速登入 / 管理</h3>
                 <div id="userList" class="max-h-[300px] overflow-y-auto pr-2"></div>
             </div>
         </div>
@@ -103,7 +106,9 @@
                 </div>
 
                 <div class="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100">
-                    <h3 class="text-sm font-black text-slate-800 mb-4"><i class="fas fa-history mr-2 text-red-500"></i> 最近紀錄</h3>
+                    <h3 class="text-sm font-black text-slate-800 mb-4 flex items-center">
+                        <i class="fas fa-history mr-2 text-red-500"></i> 最近 5 筆紀錄
+                    </h3>
                     <div id="recentHistoryList" class="text-sm"></div>
                 </div>
             </div>
@@ -115,7 +120,7 @@
                         <select id="filterMonth" onchange="updateCharts()" class="!h-10 !px-3 !text-sm !bg-slate-100 !border-none !rounded-xl font-bold"></select>
                         <div class="flex flex-wrap items-center gap-2 ml-auto">
                             <button onclick="setRange('selected_month')" id="btn-selected_month" class="range-btn active">指定月</button>
-                            <button onclick="setRange('all')" id="btn-all" class="range-btn">全部</button>
+                            <button onclick="setRange('all')" id="btn-all" class="range-btn">全部紀錄</button>
                         </div>
                     </div>
                 </div>
@@ -140,13 +145,14 @@
         let bpChart, pulseChart;
         let currentRange = 'selected_month';
 
-        // 這裡填入你的 Google Apps Script 部署 URL
+        // 請確保此處為你正確的 GAS 網址
         const GAS_URL = "https://script.google.com/macros/s/AKfycbzoYShq7B6-v8Gg6TvZ9FIxsIXLC7RTd9H9EiWpZYLzrPTnue1S8x1MDaAD6OZdHHvh/exec"; 
 
         async function login(n) {
             currentUserName = n || document.getElementById('userNameInput').value.trim();
             if (!currentUserName) return alert("請輸入名稱");
             
+            // 維護快速登入名單
             let list = JSON.parse(localStorage.getItem('bp_user_list')) || [];
             if (!list.includes(currentUserName)) list.push(currentUserName);
             localStorage.setItem('bp_user_list', JSON.stringify(list));
@@ -156,6 +162,7 @@
                 const rawData = await response.json();
                 healthData = rawData.map(item => ({ ...item, date: item.date.split('T')[0] }));
             } catch (e) {
+                console.log("從雲端獲取資料失敗，讀取本地存檔");
                 healthData = JSON.parse(localStorage.getItem(`bp_data_${currentUserName}`)) || [];
             }
 
@@ -165,13 +172,42 @@
             initApp();
         }
 
+        function renderUserList() {
+            const list = JSON.parse(localStorage.getItem('bp_user_list')) || [];
+            const container = document.getElementById('userListContainer');
+            const listDiv = document.getElementById('userList');
+            if (list.length > 0) {
+                container.classList.remove('hidden');
+                listDiv.innerHTML = list.map(u => `
+                    <div class="user-card">
+                        <div class="flex-1 font-bold text-slate-700" onclick="login('${u}')">
+                            <i class="fas fa-user-circle mr-2 text-red-500"></i> ${u}
+                        </div>
+                        <button onclick="deleteSavedUser('${u}')" class="delete-btn">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                `).join('');
+            } else {
+                container.classList.add('hidden');
+            }
+        }
+
+        window.deleteSavedUser = function(userName) {
+            if (confirm(`確定移除 ${userName} 的登入紀錄？(不影響雲端資料)`)) {
+                let list = JSON.parse(localStorage.getItem('bp_user_list')) || [];
+                list = list.filter(u => u !== userName);
+                localStorage.setItem('bp_user_list', JSON.stringify(list));
+                renderUserList();
+            }
+        };
+
         function initApp() {
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('dateInput').value = today;
             updateSelectors();
             initCharts();
             updateHistoryList();
-            renderUserList();
         }
 
         async function saveAndRefresh() {
@@ -181,7 +217,7 @@
                     method: 'POST',
                     body: JSON.stringify({ userName: currentUserName, data: healthData })
                 });
-            } catch (e) { console.error("雲端同步失敗"); }
+            } catch (e) { alert("雲端同步失敗，資料已存在本地"); }
             updateCharts();
             updateHistoryList();
         }
@@ -190,24 +226,23 @@
             const ctx1 = document.getElementById('bpChart').getContext('2d');
             bpChart = new Chart(ctx1, {
                 type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [
-                        { label: '收縮壓', borderColor: '#ef4444', backgroundColor: '#ef444422', data: [], tension: 0.3, fill: true },
-                        { label: '舒張壓', borderColor: '#3b82f6', backgroundColor: '#3b82f622', data: [], tension: 0.3, fill: true }
-                    ]
-                },
-                options: { responsive: true, maintainAspectRatio: false }
+                data: { labels: [], datasets: [] },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom' } }
+                }
             });
 
             const ctx2 = document.getElementById('pulseChart').getContext('2d');
             pulseChart = new Chart(ctx2, {
                 type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [{ label: '心跳', borderColor: '#f97316', backgroundColor: '#f9731622', data: [], tension: 0.3, fill: true }]
-                },
-                options: { responsive: true, maintainAspectRatio: false }
+                data: { labels: [], datasets: [] },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } }
+                }
             });
             updateCharts();
         }
@@ -215,18 +250,28 @@
         function updateCharts() {
             const y = document.getElementById('filterYear').value;
             const m = document.getElementById('filterMonth').value;
-            let filtered = currentRange === 'all' ? healthData : healthData.filter(d => d.date.startsWith(`${y}-${m}`));
+            
+            let filtered = (currentRange === 'all') 
+                ? [...healthData] 
+                : healthData.filter(d => d.date.startsWith(`${y}-${m}`));
             
             filtered.sort((a,b) => new Date(a.date) - new Date(b.date));
             
-            const labels = filtered.map(d => d.date.slice(5));
+            const labels = filtered.map(d => d.date.slice(5).replace('-', '/'));
+            
+            // 更新血壓圖表
             bpChart.data.labels = labels;
-            bpChart.data.datasets[0].data = filtered.map(d => d.sys);
-            bpChart.data.datasets[1].data = filtered.map(d => d.dia);
+            bpChart.data.datasets = [
+                { label: '收縮壓(高)', borderColor: '#ef4444', backgroundColor: '#ef444411', data: filtered.map(d => d.sys), tension: 0.3, fill: true },
+                { label: '舒張壓(低)', borderColor: '#3b82f6', backgroundColor: '#3b82f611', data: filtered.map(d => d.dia), tension: 0.3, fill: true }
+            ];
             bpChart.update();
 
+            // 更新心跳圖表
             pulseChart.data.labels = labels;
-            pulseChart.data.datasets[0].data = filtered.map(d => d.pulse);
+            pulseChart.data.datasets = [
+                { label: '心跳', borderColor: '#f97316', backgroundColor: '#f9731611', data: filtered.map(d => d.pulse), tension: 0.3, fill: true }
+            ];
             pulseChart.update();
         }
 
@@ -234,9 +279,9 @@
             const date = document.getElementById('dateInput').value;
             const sys = parseInt(document.getElementById('sysInput').value);
             const dia = parseInt(document.getElementById('diaInput').value);
-            const pulse = parseInt(document.getElementById('pulseInput').value);
+            const pulse = parseInt(document.getElementById('pulseInput').value) || 0;
 
-            if (!sys || !dia) return alert("請完整輸入血壓數據");
+            if (!sys || !dia) return alert("請輸入完整血壓數據");
 
             const entry = { date, sys, dia, pulse };
             const idx = healthData.findIndex(d => d.date === date);
@@ -245,46 +290,61 @@
             saveAndRefresh();
 
             if (type === 'line') {
-                const msg = `【${currentUserName} 血壓紀錄】\n日期：${date}\n血壓：${sys}/${dia} mmHg\n心跳：${pulse} bpm`;
+                const msg = `【${currentUserName} 血壓心跳紀錄】\n日期：${date}\n血壓：${sys}/${dia} mmHg\n心跳：${pulse} bpm`;
                 window.location.href = `https://line.me/R/msg/text/?${encodeURIComponent(msg)}`;
+            } else {
+                alert("儲存成功");
             }
         };
 
         function updateHistoryList() {
             const listDiv = document.getElementById('recentHistoryList');
             const sorted = [...healthData].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+            if (sorted.length === 0) {
+                listDiv.innerHTML = `<p class="text-slate-400 italic py-4">尚無數據...</p>`;
+                return;
+            }
             listDiv.innerHTML = sorted.map(item => `
                 <div class="history-item">
-                    <span><b>${item.date.slice(5)}</b>: ${item.sys}/${item.dia} (${item.pulse})</span>
-                    <button onclick="deleteRecord('${item.date}')" class="text-slate-400 hover:text-red-500"><i class="fas fa-trash"></i></button>
+                    <span><b>${item.date.slice(5)}</b>: ${item.sys}/${item.dia} mmHg <small class="text-slate-400">(${item.pulse})</small></span>
+                    <button onclick="deleteRecord('${item.date}')" class="delete-btn text-xs"><i class="fas fa-trash-alt"></i></button>
                 </div>
             `).join('');
         }
 
-        window.deleteRecord = (date) => { if(confirm('刪除？')){ healthData = healthData.filter(d => d.date !== date); saveAndRefresh(); }};
-        window.setRange = (r) => { currentRange = r; document.querySelectorAll('.range-btn').forEach(b => b.classList.toggle('active', b.id === `btn-${r}`)); updateCharts(); };
+        window.deleteRecord = (date) => { 
+            if(confirm(`確定刪除 ${date} 的紀錄？`)){ 
+                healthData = healthData.filter(d => d.date !== date); 
+                saveAndRefresh(); 
+            }
+        };
+
+        window.setRange = (r) => { 
+            currentRange = r; 
+            document.querySelectorAll('.range-btn').forEach(b => b.classList.toggle('active', b.id === `btn-${r}`)); 
+            updateCharts(); 
+        };
+
         function logout() { location.reload(); }
+
         function updateSelectors() {
             const now = new Date();
             const ySelect = document.getElementById('filterYear');
             const mSelect = document.getElementById('filterMonth');
-            ySelect.innerHTML = `<option value="${now.getFullYear()}">${now.getFullYear()}年</option>`;
-            mSelect.innerHTML = Array.from({length: 12}, (_, i) => `<option value="${(i+1).toString().padStart(2,'0')}">${i+1}月</option>`).join('');
+            ySelect.innerHTML = "";
+            for(let i=0; i<3; i++) {
+                let y = (now.getFullYear() - i).toString();
+                ySelect.innerHTML += `<option value="${y}">${y}年</option>`;
+            }
+            mSelect.innerHTML = Array.from({length: 12}, (_, i) => {
+                let m = (i + 1).toString().padStart(2, '0');
+                return `<option value="${m}">${i+1}月</option>`;
+            }).join('');
             mSelect.value = (now.getMonth() + 1).toString().padStart(2, '0');
         }
-        function renderUserList() {
-            const list = JSON.parse(localStorage.getItem('bp_user_list')) || [];
-            const container = document.getElementById('userListContainer');
-            if (list.length > 0) {
-                container.classList.remove('hidden');
-                document.getElementById('userList').innerHTML = list.map(u => `
-                    <div class="user-card" onclick="login('${u}')">
-                        <span class="font-bold">${u}</span>
-                        <i class="fas fa-chevron-right text-slate-300"></i>
-                    </div>
-                `).join('');
-            }
-        }
+
+        // 頁面加載時顯示使用者名單
+        renderUserList();
     </script>
 </body>
 </html>
