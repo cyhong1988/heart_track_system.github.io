@@ -1,38 +1,290 @@
-function doGet(e) {
-  var userName = e.parameter.userName;
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(userName);
-  
-  if (!sheet) return ContentService.createTextOutput("[]").setMimeType(ContentService.MimeType.JSON);
-  
-  var data = sheet.getDataRange().getValues();
-  var result = [];
-  for (var i = 1; i < data.length; i++) {
-    result.push({
-      date: data[i][0],
-      sys: data[i][1],
-      dia: data[i][2],
-      pulse: data[i][3]
-    });
-  }
-  return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
-}
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HEART TRACK Pro - 血壓追蹤系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        input[type="date"], input[type="number"], select, input[type="text"] {
+            height: 52px !important; border-radius: 14px !important; border: 1px solid #e2e8f0 !important;
+            padding: 0 16px !important; background-color: #f8fafc !important; font-size: 16px !important;
+        }
+        .chart-container { position: relative; height: 250px; width: 100%; }
+        .tab-title { border-left: 5px solid; padding-left: 12px; margin-bottom: 15px; font-weight: 800; font-size: 13px; display: flex; align-items: center; justify-content: space-between; }
+        .range-btn {
+            background-color: white; color: #64748b; border: 1px solid #e2e8f0;
+            padding: 8px 14px; border-radius: 9999px; font-size: 12px; font-weight: 600; cursor: pointer;
+            transition: all 0.2s; white-space: nowrap;
+        }
+        .range-btn.active { background-color: #ef4444; color: white; border-color: #ef4444; }
+        #loginPage { display: flex; background-color: #0f172a; flex-direction: column; align-items: center; justify-content: flex-start; min-height: 100vh; }
+        #mainApp { display: none; }
+        .btn-action { height: 50px; border-radius: 16px; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s; font-size: 14px; }
+        .user-card { 
+            display: flex; align-items: center; justify-content: space-between; 
+            background: #f8fafc; padding: 16px 20px; border-radius: 20px; 
+            margin-bottom: 12px; border: 1px solid #e2e8f0; transition: 0.2s;
+        }
+        .user-card:hover { border-color: #ef4444; background: white; }
+        .delete-btn { color: #94a3b8; transition: 0.2s; padding: 8px; cursor: pointer; }
+        .delete-btn:hover { color: #ef4444; transform: scale(1.1); }
+        .history-item { border-bottom: 1px solid #f1f5f9; padding: 10px 0; display: flex; justify-content: space-between; align-items: center; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
 
-function doPost(e) {
-  var postData = JSON.parse(e.postData.contents);
-  var userName = postData.userName;
-  var healthData = postData.data;
-  
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(userName) || ss.insertSheet(userName);
-  
-  sheet.clear();
-  sheet.appendRow(["Date", "Systolic", "Diastolic", "Pulse"]);
-  
-  healthData.forEach(function(row) {
-    sheet.appendRow([row.date, row.sys, row.dia, row.pulse]);
-  });
-  
-  return ContentService.createTextOutput("Success");
-}
+    <div id="loginPage" class="p-6 pt-20 flex-grow">
+        <div class="max-w-md w-full bg-white rounded-[40px] p-8 shadow-2xl text-center">
+            <h1 class="text-3xl font-black italic text-slate-900 mb-2">HEART TRACK!</h1>
+            <p class="text-slate-400 text-xs mb-8 font-bold uppercase tracking-widest">血壓心跳管理系統</p>
+            <div class="space-y-4 mb-10">
+                <input type="text" id="userNameInput" placeholder="輸入使用者名稱..." class="w-full text-lg font-bold">
+                <button onclick="login()" class="w-full bg-red-600 text-white font-black py-4 rounded-2xl shadow-lg hover:bg-red-700 transition">登入系統</button>
+            </div>
+            <div id="userListContainer" class="text-left border-t border-slate-100 pt-8 hidden">
+                <h3 class="text-xs font-black text-slate-400 mb-4 uppercase tracking-widest px-2">快速登入</h3>
+                <div id="userList" class="max-h-[300px] overflow-y-auto pr-2"></div>
+            </div>
+        </div>
+    </div>
 
+    <div id="mainApp" class="flex-col flex-grow">
+        <nav class="bg-slate-900 text-white p-4 sticky top-0 z-50 shadow-lg">
+            <div class="container mx-auto flex justify-between items-center">
+                <div class="flex flex-col cursor-pointer" onclick="logout()">
+                    <h1 class="text-xl sm:text-2xl font-black italic leading-none tracking-tighter">HEART TRACK!</h1>
+                    <span class="text-[10px] text-red-400 font-bold uppercase tracking-widest mt-1">Cloud Sync Pro</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div id="userBadge" class="bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-full flex items-center gap-2">
+                        <span id="displayUserName" class="text-sm font-black text-white leading-tight">未登入</span>
+                    </div>
+                    <button onclick="logout()" class="h-10 w-10 flex items-center justify-center bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-xl transition-all duration-300">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <main class="container mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <div class="lg:col-span-4 space-y-8">
+                <div class="bg-white p-8 rounded-[32px] shadow-sm border border-slate-100">
+                    <h2 class="font-black mb-6 text-slate-800 flex items-center text-lg"><i class="fas fa-heartbeat mr-3 text-red-500"></i>數據輸入</h2>
+                    <form class="space-y-4" onsubmit="return false;">
+                        <input type="date" id="dateInput" required class="w-full text-base font-bold">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="text-[10px] font-bold text-slate-400 ml-1">收縮壓 (高壓)</label>
+                                <input type="number" id="sysInput" placeholder="120" class="w-full text-center font-bold">
+                            </div>
+                            <div>
+                                <label class="text-[10px] font-bold text-slate-400 ml-1">舒張壓 (低壓)</label>
+                                <input type="number" id="diaInput" placeholder="80" class="w-full text-center font-bold">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold text-slate-400 ml-1">心跳 (BPM)</label>
+                            <input type="number" id="pulseInput" placeholder="70" class="w-full text-center font-bold !bg-red-50/50">
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-4 pt-2">
+                            <button type="button" onclick="handleSave('none')" class="btn-action bg-slate-800 text-white shadow-md">
+                                <i class="fas fa-save"></i> 僅儲存
+                            </button>
+                            <button type="button" onclick="handleSave('line')" class="btn-action bg-[#06C755] text-white shadow-md">
+                                <i class="fab fa-line"></i> 儲存並分享
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100">
+                    <h3 class="text-sm font-black text-slate-800 mb-4"><i class="fas fa-history mr-2 text-red-500"></i> 最近紀錄</h3>
+                    <div id="recentHistoryList" class="text-sm"></div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-8 space-y-6">
+                <div class="bg-white p-6 rounded-[32px] border border-slate-100 shadow-sm">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <select id="filterYear" onchange="updateCharts()" class="!h-10 !px-3 !text-sm !bg-slate-100 !border-none !rounded-xl font-bold"></select>
+                        <select id="filterMonth" onchange="updateCharts()" class="!h-10 !px-3 !text-sm !bg-slate-100 !border-none !rounded-xl font-bold"></select>
+                        <div class="flex flex-wrap items-center gap-2 ml-auto">
+                            <button onclick="setRange('selected_month')" id="btn-selected_month" class="range-btn active">指定月</button>
+                            <button onclick="setRange('all')" id="btn-all" class="range-btn">全部</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-6 pb-10">
+                    <div class="bg-white p-6 rounded-[35px] shadow-sm border border-slate-100">
+                        <div class="tab-title border-red-500 text-red-600"><span>血壓趨勢 (Blood Pressure)</span></div>
+                        <div class="chart-container"><canvas id="bpChart"></canvas></div>
+                    </div>
+                    <div class="bg-white p-6 rounded-[35px] shadow-sm border border-orange-500">
+                        <div class="tab-title border-orange-500 text-orange-600"><span>心跳趨勢 (Pulse)</span></div>
+                        <div class="chart-container"><canvas id="pulseChart"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let currentUserName = "";
+        let healthData = [];
+        let bpChart, pulseChart;
+        let currentRange = 'selected_month';
+
+        // 這裡填入你的 Google Apps Script 部署 URL
+        const GAS_URL = "YOUR_GAS_URL_HERE"; 
+
+        async function login(n) {
+            currentUserName = n || document.getElementById('userNameInput').value.trim();
+            if (!currentUserName) return alert("請輸入名稱");
+            
+            let list = JSON.parse(localStorage.getItem('bp_user_list')) || [];
+            if (!list.includes(currentUserName)) list.push(currentUserName);
+            localStorage.setItem('bp_user_list', JSON.stringify(list));
+            
+            try {
+                const response = await fetch(`${GAS_URL}?userName=${encodeURIComponent(currentUserName)}`);
+                const rawData = await response.json();
+                healthData = rawData.map(item => ({ ...item, date: item.date.split('T')[0] }));
+            } catch (e) {
+                healthData = JSON.parse(localStorage.getItem(`bp_data_${currentUserName}`)) || [];
+            }
+
+            document.getElementById('loginPage').style.display = 'none';
+            document.getElementById('mainApp').style.display = 'flex';
+            document.getElementById('displayUserName').innerText = currentUserName;
+            initApp();
+        }
+
+        function initApp() {
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('dateInput').value = today;
+            updateSelectors();
+            initCharts();
+            updateHistoryList();
+            renderUserList();
+        }
+
+        async function saveAndRefresh() {
+            localStorage.setItem(`bp_data_${currentUserName}`, JSON.stringify(healthData));
+            try {
+                await fetch(GAS_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({ userName: currentUserName, data: healthData })
+                });
+            } catch (e) { console.error("雲端同步失敗"); }
+            updateCharts();
+            updateHistoryList();
+        }
+
+        function initCharts() {
+            const ctx1 = document.getElementById('bpChart').getContext('2d');
+            bpChart = new Chart(ctx1, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        { label: '收縮壓', borderColor: '#ef4444', backgroundColor: '#ef444422', data: [], tension: 0.3, fill: true },
+                        { label: '舒張壓', borderColor: '#3b82f6', backgroundColor: '#3b82f622', data: [], tension: 0.3, fill: true }
+                    ]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+
+            const ctx2 = document.getElementById('pulseChart').getContext('2d');
+            pulseChart = new Chart(ctx2, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{ label: '心跳', borderColor: '#f97316', backgroundColor: '#f9731622', data: [], tension: 0.3, fill: true }]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+            updateCharts();
+        }
+
+        function updateCharts() {
+            const y = document.getElementById('filterYear').value;
+            const m = document.getElementById('filterMonth').value;
+            let filtered = currentRange === 'all' ? healthData : healthData.filter(d => d.date.startsWith(`${y}-${m}`));
+            
+            filtered.sort((a,b) => new Date(a.date) - new Date(b.date));
+            
+            const labels = filtered.map(d => d.date.slice(5));
+            bpChart.data.labels = labels;
+            bpChart.data.datasets[0].data = filtered.map(d => d.sys);
+            bpChart.data.datasets[1].data = filtered.map(d => d.dia);
+            bpChart.update();
+
+            pulseChart.data.labels = labels;
+            pulseChart.data.datasets[0].data = filtered.map(d => d.pulse);
+            pulseChart.update();
+        }
+
+        window.handleSave = function(type) {
+            const date = document.getElementById('dateInput').value;
+            const sys = parseInt(document.getElementById('sysInput').value);
+            const dia = parseInt(document.getElementById('diaInput').value);
+            const pulse = parseInt(document.getElementById('pulseInput').value);
+
+            if (!sys || !dia) return alert("請完整輸入血壓數據");
+
+            const entry = { date, sys, dia, pulse };
+            const idx = healthData.findIndex(d => d.date === date);
+            if (idx > -1) healthData[idx] = entry; else healthData.push(entry);
+            
+            saveAndRefresh();
+
+            if (type === 'line') {
+                const msg = `【${currentUserName} 血壓紀錄】\n日期：${date}\n血壓：${sys}/${dia} mmHg\n心跳：${pulse} bpm`;
+                window.location.href = `https://line.me/R/msg/text/?${encodeURIComponent(msg)}`;
+            }
+        };
+
+        function updateHistoryList() {
+            const listDiv = document.getElementById('recentHistoryList');
+            const sorted = [...healthData].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+            listDiv.innerHTML = sorted.map(item => `
+                <div class="history-item">
+                    <span><b>${item.date.slice(5)}</b>: ${item.sys}/${item.dia} (${item.pulse})</span>
+                    <button onclick="deleteRecord('${item.date}')" class="text-slate-400 hover:text-red-500"><i class="fas fa-trash"></i></button>
+                </div>
+            `).join('');
+        }
+
+        window.deleteRecord = (date) => { if(confirm('刪除？')){ healthData = healthData.filter(d => d.date !== date); saveAndRefresh(); }};
+        window.setRange = (r) => { currentRange = r; document.querySelectorAll('.range-btn').forEach(b => b.classList.toggle('active', b.id === `btn-${r}`)); updateCharts(); };
+        function logout() { location.reload(); }
+        function updateSelectors() {
+            const now = new Date();
+            const ySelect = document.getElementById('filterYear');
+            const mSelect = document.getElementById('filterMonth');
+            ySelect.innerHTML = `<option value="${now.getFullYear()}">${now.getFullYear()}年</option>`;
+            mSelect.innerHTML = Array.from({length: 12}, (_, i) => `<option value="${(i+1).toString().padStart(2,'0')}">${i+1}月</option>`).join('');
+            mSelect.value = (now.getMonth() + 1).toString().padStart(2, '0');
+        }
+        function renderUserList() {
+            const list = JSON.parse(localStorage.getItem('bp_user_list')) || [];
+            const container = document.getElementById('userListContainer');
+            if (list.length > 0) {
+                container.classList.remove('hidden');
+                document.getElementById('userList').innerHTML = list.map(u => `
+                    <div class="user-card" onclick="login('${u}')">
+                        <span class="font-bold">${u}</span>
+                        <i class="fas fa-chevron-right text-slate-300"></i>
+                    </div>
+                `).join('');
+            }
+        }
+    </script>
+</body>
+</html>
